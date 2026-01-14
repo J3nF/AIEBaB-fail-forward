@@ -78,7 +78,25 @@ if page == "📤 Add Data":
                     )
                 selected_values[item] = selected
 
-
+            # Required Project ID
+            st.subheader("🔑 Project ID (Required)")
+            project_id = st.text_input("Enter Project ID", "", help="This project ID will be added to ALL rows")
+            
+            if not project_id:
+                st.warning("⚠️ Project ID is required before importing data")
+            
+            # Optional extra data
+            st.subheader("➕ Add Extra Information (Optional)")
+            
+            # Show dropdown for additional optional fields
+            extra_data_fields = {}
+            available_extra_fields = ["Researcher Name", "Comments", "Protocol", "Other Notes"]
+            
+            with st.expander("Add optional fields"):
+                for field in available_extra_fields:
+                    value = st.text_input(f"{field}", "", key=f"extra_{field}", help=f"This will be added to all rows")
+                    if value:
+                        extra_data_fields[field] = value
 
             # Check for duplicates
             existing_samples = db.get_all_samples()
@@ -86,10 +104,24 @@ if page == "📤 Add Data":
             
             for idx, row in df.iterrows():
                 sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
+                researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
+                expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
+                
+                # Override researcher if provided in extra fields
+                check_researcher = extra_data_fields.get('Researcher Name', researcher) if extra_data_fields.get('Researcher Name') else researcher
                 
                 for existing in existing_samples:
-                    if (existing['sample_id'] == sample_id and sample_id):  # Only flag as duplicate if sample ID has value
-                        duplicates.append({'row': idx + 1, 'Sample ID': sample_id})
+                    # Check if all three fields match
+                    if (existing['sample_id'] == sample_id and 
+                        existing['researcher'] == check_researcher and 
+                        existing['expressed'] == expressed and 
+                        sample_id):  # Only flag if sample ID exists
+                        duplicates.append({
+                            'row': idx + 1, 
+                            'Sample ID': sample_id,
+                            'Researcher': check_researcher,
+                            'Expressed': expressed
+                        })
                         break
             
             if duplicates:
@@ -97,18 +129,13 @@ if page == "📤 Add Data":
                 dup_df = pd.DataFrame(duplicates)
                 st.dataframe(dup_df, use_container_width=True)
             
-            # Optional field to add to all rows
-            st.subheader("➕ Add Extra Information (Optional)")
-            st.markdown("This value will be added to ALL rows in the import:")
-            
-            extra_scientist = st.text_input("Researcher Name", "", help="This will override the researcher field for all rows")
-            
             # Duplicate handling option
             skip_duplicates = False
             if duplicates:
                 skip_duplicates = st.checkbox("Skip duplicate rows during import", value=True)
             
-            if st.button("💾 Import All Data to Database", type="primary"):
+            # Disable import button if Project ID is not provided
+            if st.button("💾 Import All Data to Database", type="primary", disabled=(not project_id)):
                 with st.spinner("Importing data..."):
                     imported_count = 0
                     skipped_count = 0
@@ -124,8 +151,14 @@ if page == "📤 Add Data":
                             # Check if this is a duplicate and should be skipped
                             is_duplicate = False
                             if skip_duplicates and sample_id:
+                                # Override researcher if provided
+                                check_researcher = extra_data_fields.get('Researcher Name', researcher) if extra_data_fields.get('Researcher Name') else researcher
+                                
                                 for existing in existing_samples:
-                                    if existing['sample_id'] == sample_id:
+                                    # Check if all three fields match for a true duplicate
+                                    if (existing['sample_id'] == sample_id and 
+                                        existing['researcher'] == check_researcher and 
+                                        existing['expressed'] == expressed):
                                         is_duplicate = True
                                         skipped_count += 1
                                         break
@@ -133,9 +166,9 @@ if page == "📤 Add Data":
                             if is_duplicate:
                                 continue
                             
-                            # Override researcher if provided
-                            if extra_scientist:
-                                researcher = extra_scientist
+                            # Override researcher if provided in extra fields
+                            if extra_data_fields.get('Researcher Name'):
+                                researcher = extra_data_fields['Researcher Name']
                             
                             # Handle date
                             date_value = row.get('date', None)
