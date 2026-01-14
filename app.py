@@ -1,9 +1,12 @@
+import numpy as np
 import streamlit as st
 import os
 from pathlib import Path
 from datetime import datetime
 from database import Database
 from search import search_samples
+from utils import encode_texts
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Initialize
 DB_PATH = "lab_inventory.db"
@@ -40,12 +43,23 @@ if page == "📤 Add Data":
             st.subheader("📋 Data Preview")
             st.dataframe(df.head(10), use_container_width=True)
 
+            """
+            Column Name Mapping Part
+            """
             column_names = df.columns.tolist()
 
             # Options for every combobox
             options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist", "Comments", "Protocol"]
 
-            st.title("Items with per-row combobox")
+            column_encodings = encode_texts(column_names)
+            option_encodings = encode_texts(options)
+
+            similarities = cosine_similarity(column_encodings, option_encodings)
+
+            best_indice = [np.argmax(sim) for sim in similarities]
+
+
+            st.title("Column Name Mapping")
 
             selected_values = {}
 
@@ -60,7 +74,7 @@ if page == "📤 Add Data":
                         "Select option",
                         options,
                         key=f"select_{i}",
-                        index=0,
+                        index=int(best_indice[i]),
                     )
                 selected_values[item] = selected
 
