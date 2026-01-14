@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import streamlit as st
 import os
@@ -8,6 +10,9 @@ from search import search_samples
 from utils import encode_texts
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
+from textsearchpy import Index, Document
+
+from pypdf import PdfReader
 
 # Initialize
 DB_PATH = "lab_data.db"
@@ -17,6 +22,18 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 db = Database(DB_PATH)
 
 st.set_page_config(page_title="Failure Forward", page_icon="🧬", layout="wide")
+
+protocol_DB_path = "protocol_data.json"
+# print(os.getcwd())
+# st.info(os.path.abspath(protocol_DB_path))
+PROTOCOL_DATABASE = {}
+with open(protocol_DB_path) as f:
+    PROTOCOL_DATABASE = json.load(f)
+
+protocol_index = Index()
+for key in PROTOCOL_DATABASE:
+    doc = Document(text=PROTOCOL_DATABASE[key]["Full Text"], id=key)
+    protocol_index.append([doc])
 
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["📤 Add Data", "🔍 Search Data", "📊 View All"])
@@ -32,6 +49,7 @@ if page == "📤 Add Data":
 
     valid_project = True
 
+    valid_project = valid_project and uploaded_file is not None
     if uploaded_file:
 
         # Use session state to cache the uploaded file data
@@ -54,15 +72,14 @@ if page == "📤 Add Data":
 
             df = st.session_state.df
 
-            st.success(f"✅ Loaded {len(df)} rows from {uploaded_file.name}")
-
             # Show preview of data
             st.subheader("📋 Data Preview")
+            st.success(f"✅ Loaded {len(df)} rows from {uploaded_file.name}")
             st.dataframe(df.head(10), use_container_width=True)
 
-            """
-            Column Name Mapping Part
-            """
+            #
+            # Column Name Mapping Part
+            #
             column_names = df.columns.tolist()
 
             # Options for every combobox
@@ -103,6 +120,10 @@ if page == "📤 Add Data":
 
             # Check which fields are already mapped
             mapped_fields = set(selected_values.values())
+
+            if len(mapped_fields) != len(selected_values):
+                st.error(f"❌ Each column name must be unique")
+                valid_project = False
 
             # Required Project ID
             st.subheader("🔑 Project ID (Required)")
@@ -180,12 +201,49 @@ if page == "📤 Add Data":
             if duplicates:
                 skip_duplicates = st.checkbox("Skip duplicate rows during import", value=True)
 
-
             valid_project = valid_project and project_id is not None
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
             st.info("Make sure your file is a valid Excel (.xlsx, .xls) or CSV file.")
-    valid_project = valid_project and uploaded_file
+
+    if uploaded_protocol_file:
+
+        # Use session state to cache the uploaded file data
+        protocol_file_id = f"{uploaded_protocol_file.name}_{uploaded_protocol_file.size}"
+
+        if 'last_protocol_file_id' not in st.session_state or st.session_state.last_protocol_file_id != protocol_file_id:
+            # New file uploaded, reset session state
+            st.session_state.last_protocol_file_id = protocol_file_id
+            st.session_state.protocol = None
+            st.session_state.protocol_indexed = False
+
+        if uploaded_protocol_file.name.endswith('.pdf'):
+            reader = PdfReader(uploaded_protocol_file)
+            all_text = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    all_text.append(text)
+
+            full_text = "\n".join(all_text)
+            st.pdf(uploaded_protocol_file)
+            st.session_state.protocol = full_text
+        else:
+            with open(uploaded_protocol_file, 'rb') as file:
+                full_text = file.read()
+
+            st.markdown(full_text)
+            st.session_state.protocol = full_text
+
+        PROTOCOL_DATABASE[uploaded_protocol_file.name] = {"Full Text": full_text,
+                                                          "Path": str(uploaded_protocol_file)}
+
+        # if not st.session_state.protocol_indexed:
+        #     PROTOCOL_DATABASE[uploaded_protocol_file] = full_text
+        #     doc = Document(text=full_text, id=uploaded_protocol_file)
+        #     protocol_index.append([doc])
+        #     st.session_state.protocol_indexed = True
+
 
     # Disable import button if Project ID is not provided
     st.text(f"Valid project: {valid_project}")
@@ -244,6 +302,10 @@ if page == "📤 Add Data":
                     })
                 except Exception as e:
                     st.warning(f"Row {idx + 1} skipped: {str(e)}")
+
+            with open(protocol_DB_path, "w") as file:
+                json.dump(PROTOCOL_DATABASE, file, indent=4)
+
 
             st.success(f"✅ Successfully imported {imported_count} samples!")
             if skipped_count > 0:
