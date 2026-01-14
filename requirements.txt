@@ -1,4 +1,6 @@
 sentence_transformers
 numpy
-sklearn
+scikit-learn
 numpy
+streamlit
+openpyxl
