@@ -126,27 +126,44 @@ def compute_existing_keys(existing_samples):
     }
 
 def extract_row_values(df_row, mapping, manual_project_id: str | None, extra_fields: dict):
-    # Resolve canonical fields -> df column names
     sample_col = mapping.get("Sample ID")
-    researcher_col = mapping.get("Researcher") or mapping.get("Scientist")  # allow Scientist as fallback
-    expressed_raw = row.get(mapping.get("Expressed"))
-    expressed_binary = expressed_to_binary(expressed_raw)
+    researcher_col = mapping.get("Researcher") or mapping.get("Scientist")
+    expressed_col = mapping.get("Expressed")
+    soluble_col = mapping.get("Soluble")
+    kd_col = mapping.get("KD")
     date_col = mapping.get("Date")
 
     sample_id = normalize_str(df_row.get(sample_col)) if sample_col else ""
     researcher = normalize_str(df_row.get(researcher_col)) if researcher_col else ""
-    expressed = expressed_binary
+
+    # Expressed -> 0/1 (default 0 if missing)
+    expressed_raw = df_row.get(expressed_col) if expressed_col else None
+    expressed = expressed_to_binary(expressed_raw)
+
+    # Soluble -> 0/1 (if column missing, leave as None)
+    soluble = None
+    if soluble_col:
+        soluble_raw = df_row.get(soluble_col)
+        soluble = expressed_to_binary(soluble_raw)
+
+    # KD -> float (if missing/unparseable, None)
+    kd = None
+    if kd_col:
+        kd_raw = df_row.get(kd_col)
+        try:
+            kd = float(kd_raw) if (kd_raw is not None and not pd.isna(kd_raw) and str(kd_raw).strip() != "") else None
+        except Exception:
+            kd = None
+
     date_str = normalize_date(df_row.get(date_col)) if date_col else datetime.now().isoformat()
 
-    # Project ID: from column if mapped, otherwise from manual input
-    if "Project ID" in mapping and mapping["Project ID"]:
+    # Project ID
+    if mapping.get("Project ID"):
         project_id = normalize_str(df_row.get(mapping["Project ID"]))
     else:
         project_id = manual_project_id or ""
 
-    # Extra fields are “global” (same for all rows), not currently stored in DB
-    # If you add DB columns later, you can insert them here.
-    return sample_id, researcher, expressed, date_str, project_id
+    return sample_id, researcher, expressed, soluble, kd, date_str, project_id
 
 # --- Page ---------------------------------------------------------------
 
@@ -192,7 +209,7 @@ if page == "📤 Add Data":
             # Scan for duplicates quickly
             duplicates = []
             for idx, row in df.iterrows():
-                sample_id, researcher, expressed, _, _ = extract_row_values(row, mapping, manual_project_id, extra_fields)
+                sample_id, researcher, expressed, soluble, kd, _, _ = extract_row_values(row, mapping, manual_project_id, extra_fields)
                 if sample_id and (sample_id, researcher, expressed) in existing_keys:
                     duplicates.append({
                         "row": idx + 1,
@@ -216,7 +233,7 @@ if page == "📤 Add Data":
 
                     for idx, row in df.iterrows():
                         try:
-                            sample_id, researcher, expressed, date_str, project_id = extract_row_values(
+                            sample_id, researcher, expressed, soluble, kd, date_str, project_id = extract_row_values(
                                 row, mapping, manual_project_id, extra_fields
                             )
 
@@ -231,7 +248,7 @@ if page == "📤 Add Data":
                                 continue
 
                             # NOTE: your Database currently ignores project_id/extra_fields because schema doesn't have them
-                            db.add_sample(sample_id=sample_id, researcher=researcher, expressed=expressed, date=date_str)
+                            db.add_sample(sample_id=sample_id, researcher=researcher, expressed=expressed, date=date_str, soluble=soluble, kd=kd)
                             imported_count += 1
                             existing_keys.add(key)
 
@@ -240,6 +257,8 @@ if page == "📤 Add Data":
                                 "Sample ID": sample_id,
                                 "Researcher": researcher,
                                 "Expressed": expressed,
+                                "Soluble": soluble,
+                                "KD": kd,
                                 "Date": date_str
                             })
                         except Exception as e:
@@ -331,6 +350,21 @@ elif page == "📊 View All":
             "lab_inventory.csv",
             "text/csv",
             key='download-csv'
+        )
+        import io
+
+        # --- Parquet export ---
+        parquet_buffer = io.BytesIO()
+        print(df)
+        df.to_parquet(parquet_buffer, engine="pyarrow", index=False)
+        parquet_buffer.seek(0)
+
+        st.download_button(
+            label="📦 Download as Parquet",
+            data=parquet_buffer,
+            file_name="lab_data.parquet",
+            mime="application/octet-stream",
+            key="download-parquet"
         )
     else:
         st.info("No samples in database yet. Add some using the 'Add Sample' page!")

@@ -18,6 +18,8 @@ class Database:
                 sample_id TEXT,
                 researcher TEXT,
                 expressed TEXT,
+                soluble TEXT, 
+                kd TEXT,
                 date TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -59,15 +61,23 @@ class Database:
         conn.commit()
         conn.close()
     
-    def add_sample(self, sample_id: str, researcher: str, expressed: str, date: str) -> int:
+    def add_sample(
+            self, 
+            sample_id,
+            researcher,
+            expressed,
+            soluble,
+            kd,
+            date):
         """Add a new sample to the database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        print(soluble, kd, expressed)
         
         cursor.execute("""
-            INSERT INTO samples (sample_id, researcher, expressed, date)
-            VALUES (?, ?, ?, ?)
-        """, (sample_id, researcher, expressed, date))
+            INSERT INTO samples (sample_id, researcher, expressed, soluble, kd, date)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (sample_id, researcher, str(expressed), str(soluble), str(kd), date))
         
         sample_id = cursor.lastrowid
         conn.commit()
