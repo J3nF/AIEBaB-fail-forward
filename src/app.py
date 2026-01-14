@@ -27,8 +27,9 @@ protocol_DB_path = "protocol_data.json"
 # print(os.getcwd())
 # st.info(os.path.abspath(protocol_DB_path))
 PROTOCOL_DATABASE = {}
-with open(protocol_DB_path) as f:
-    PROTOCOL_DATABASE = json.load(f)
+if os.path.exists(protocol_DB_path):
+    with open(protocol_DB_path) as f:
+        PROTOCOL_DATABASE = json.load(f)
 
 protocol_index = Index()
 for key in PROTOCOL_DATABASE:
@@ -173,21 +174,21 @@ if page == "📤 Add Data":
             duplicates = []
 
             for idx, row in df.iterrows():
-                sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
-                researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
-                expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
+                cur_sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
+                cur_researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
+                cur_expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
 
                 for existing in existing_samples:
                     # Check if all three fields match
-                    if (existing['sample_id'] == sample_id and
-                            existing['researcher'] == researcher and
-                            existing['expressed'] == expressed and
-                            sample_id):  # Only flag if sample ID exists
+                    if (existing['sample_id'] == cur_sample_id and
+                            existing['researcher'] == cur_researcher and
+                            existing['expressed'] == cur_expressed and
+                            cur_sample_id):  # Only flag if sample ID exists
                         duplicates.append({
                             'row': idx + 1,
-                            'Sample ID': sample_id,
-                            'Researcher': researcher,
-                            'Expressed': expressed
+                            'Sample ID': cur_sample_id,
+                            'Researcher': cur_researcher,
+                            'Expressed': cur_expressed
                         })
                         break
 
@@ -206,6 +207,7 @@ if page == "📤 Add Data":
             st.error(f"❌ Error reading file: {str(e)}")
             st.info("Make sure your file is a valid Excel (.xlsx, .xls) or CSV file.")
 
+    protocol_full_text = ""
     if uploaded_protocol_file:
 
         # Use session state to cache the uploaded file data
@@ -225,18 +227,18 @@ if page == "📤 Add Data":
                 if text:
                     all_text.append(text)
 
-            full_text = "\n".join(all_text)
+            protocol_full_text = "\n".join(all_text)
             st.pdf(uploaded_protocol_file)
-            st.session_state.protocol = full_text
+            st.session_state.protocol = protocol_full_text
         else:
             with open(uploaded_protocol_file, 'rb') as file:
-                full_text = file.read()
+                protocol_full_text = file.read()
 
-            st.markdown(full_text)
-            st.session_state.protocol = full_text
+            st.markdown(protocol_full_text)
+            st.session_state.protocol = protocol_full_text
 
-        PROTOCOL_DATABASE[uploaded_protocol_file.name] = {"Full Text": full_text,
-                                                          "Name": uploaded_protocol_file.name}
+        PROTOCOL_DATABASE[project_id] = {"Full Text": protocol_full_text,
+                                         "Name": uploaded_protocol_file.name}
 
         # if not st.session_state.protocol_indexed:
         #     PROTOCOL_DATABASE[uploaded_protocol_file] = full_text
@@ -244,11 +246,10 @@ if page == "📤 Add Data":
         #     protocol_index.append([doc])
         #     st.session_state.protocol_indexed = True
 
-
     # Disable import button if Project ID is not provided
     st.text(f"Valid project: {valid_project}")
     if st.button("💾 Import All Data to Database", type="primary", disabled=(not valid_project)):
-        # ToDo: Rename columns following selected_values
+        df.rename(columns=selected_values, inplace=True)
 
         with st.spinner("Importing data..."):
             imported_count = 0
@@ -258,18 +259,30 @@ if page == "📤 Add Data":
             for idx, row in df.iterrows():
                 try:
                     # Extract values from columns
-                    sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
-                    researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
-                    expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
+                    ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist",
+                     "Comments", "Protocol"]
+
+                    cur_project_id = str(row.get('Project ID', ''))
+                    cur_sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
+                    cur_researcher = str(row.get('Scientist', '')) if pd.notna(row.get('Scientist', '')) else ""
+                    cur_expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
+                    cur_KD = str(row.get('KD', ''))
+                    cur_sequence = str(row.get('Sequence', ''))
+                    cur_soluble = str(row.get('Soluble', ''))
+                    cur_date = str(row.get('Date', ''))
+                    cur_comments = str(row.get('Comments', ''))
+                    cur_protocol = protocol_full_text
+
+
 
                     # Check if this is a duplicate and should be skipped
                     is_duplicate = False
-                    if skip_duplicates and sample_id:
+                    if skip_duplicates and cur_sample_id:
                         for existing in existing_samples:
                             # Check if all three fields match for a true duplicate
-                            if (existing['sample_id'] == sample_id and
-                                    existing['researcher'] == researcher and
-                                    existing['expressed'] == expressed):
+                            if (existing['sample_id'] == cur_sample_id and
+                                    existing['researcher'] == cur_researcher and
+                                    existing['expressed'] == cur_expressed):
                                 is_duplicate = True
                                 skipped_count += 1
                                 break
@@ -288,18 +301,18 @@ if page == "📤 Add Data":
                         date_str = datetime.now().isoformat()
 
                     db.add_sample(
-                        sample_id=sample_id,
-                        researcher=researcher,
-                        expressed=expressed,
+                        sample_id=cur_sample_id,
+                        researcher=cur_researcher,
+                        expressed=cur_expressed,
                         date=date_str
                     )
                     imported_count += 1
 
                     # Track imported data for summary
                     imported_data.append({
-                        'Sample ID': sample_id,
-                        'Researcher': researcher,
-                        'Expressed': expressed,
+                        'Sample ID': cur_sample_id,
+                        'Researcher': cur_researcher,
+                        'Expressed': cur_expressed,
                         'Date': date_str
                     })
                 except Exception as e:
@@ -307,7 +320,6 @@ if page == "📤 Add Data":
 
             with open(protocol_DB_path, "w") as file:
                 json.dump(PROTOCOL_DATABASE, file, indent=4)
-
 
             st.success(f"✅ Successfully imported {imported_count} samples!")
             if skipped_count > 0:
