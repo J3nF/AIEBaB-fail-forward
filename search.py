@@ -16,18 +16,15 @@ def search_samples(db: Database,
         results = db.search_samples(query)
         
         # Apply additional filters if provided
-        if person or antibiotic or location:
+        if person or antibiotic:
             filtered = []
             for result in results:
                 matches = True
                 
-                if person and person.lower() not in (result.get('person') or '').lower():
+                if person and person.lower() not in (result.get('researcher') or '').lower():
                     matches = False
                 
-                if antibiotic and antibiotic.lower() not in (result.get('antibiotic') or '').lower():
-                    matches = False
-                
-                if location and location.lower() not in (result.get('location') or '').lower():
+                if antibiotic and antibiotic.lower() not in (result.get('sample_id') or '').lower():
                     matches = False
                 
                 if matches:
@@ -38,9 +35,10 @@ def search_samples(db: Database,
         return results
     
     # If only filters, use filter method
-    elif person or antibiotic or location:
-        return db.filter_samples(person=person, antibiotic=antibiotic, location=location)
+    elif person or antibiotic:
+        return db.filter_samples(person=person, antibiotic=antibiotic)
     
     # If nothing provided, return all
     else:
+        return db.get_all_samples()
         return db.get_all_samples()
