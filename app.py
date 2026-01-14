@@ -39,7 +39,33 @@ if page == "📤 Add Data":
             # Show preview of data
             st.subheader("📋 Data Preview")
             st.dataframe(df.head(10), use_container_width=True)
-            
+
+            column_names = df.columns.tolist()
+
+            # Options for every combobox
+            options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist", "Comments", "Protocol"]
+
+            st.title("Items with per-row combobox")
+
+            selected_values = {}
+
+            for i, item in enumerate(column_names):
+                # You can put text and selectbox on the same row using columns if you like
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.write(item)
+                with col2:
+                    # Use a unique key per widget
+                    selected = st.selectbox(
+                        "Select option",
+                        options,
+                        key=f"select_{i}",
+                        index=0,
+                    )
+                selected_values[item] = selected
+
+
+
             # Check for duplicates
             existing_samples = db.get_all_samples()
             duplicates = []
