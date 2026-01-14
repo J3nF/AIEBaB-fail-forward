@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from database import Database
 from search import search_samples
-from utils import encode_texts
+from utils import encode_texts, expressed_to_binary
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 
@@ -129,12 +129,13 @@ def extract_row_values(df_row, mapping, manual_project_id: str | None, extra_fie
     # Resolve canonical fields -> df column names
     sample_col = mapping.get("Sample ID")
     researcher_col = mapping.get("Researcher") or mapping.get("Scientist")  # allow Scientist as fallback
-    expressed_col = mapping.get("Expressed")
+    expressed_raw = row.get(mapping.get("Expressed"))
+    expressed_binary = expressed_to_binary(expressed_raw)
     date_col = mapping.get("Date")
 
     sample_id = normalize_str(df_row.get(sample_col)) if sample_col else ""
     researcher = normalize_str(df_row.get(researcher_col)) if researcher_col else ""
-    expressed = normalize_str(df_row.get(expressed_col)) if expressed_col else ""
+    expressed = expressed_binary
     date_str = normalize_date(df_row.get(date_col)) if date_col else datetime.now().isoformat()
 
     # Project ID: from column if mapped, otherwise from manual input
