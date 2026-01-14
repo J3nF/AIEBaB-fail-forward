@@ -97,25 +97,50 @@ if page == "📤 Add Data":
                     )
                 selected_values[item] = selected
 
+            # Check which fields are already mapped
+            mapped_fields = set(selected_values.values())
+            
             # Required Project ID
             st.subheader("🔑 Project ID (Required)")
-            project_id = st.text_input("Enter Project ID", "", help="This project ID will be added to ALL rows")
             
-            if not project_id:
-                st.warning("⚠️ Project ID is required before importing data")
+            # Check if Project ID is already in the mapped columns
+            if "Project ID" in mapped_fields:
+                st.success("✅ Project ID already assigned from your data")
+                project_id = "assigned_from_data"  # Flag that it's from data
+            else:
+                project_id = st.text_input("Enter Project ID", "", help="This project ID will be added to ALL rows")
+                
+                if not project_id:
+                    st.warning("⚠️ Project ID is required before importing data")
             
             # Optional extra data
             st.subheader("➕ Add Extra Information (Optional)")
             
-            # Show dropdown for additional optional fields
+            # Show dropdown for additional optional fields, excluding already mapped ones
             extra_data_fields = {}
-            available_extra_fields = ["Researcher Name", "Comments", "Protocol", "Other Notes"]
+            all_optional_fields = ["Comments", "Protocol", "Other Notes"]
             
-            with st.expander("Add optional fields"):
-                for field in available_extra_fields:
-                    value = st.text_input(f"{field}", "", key=f"extra_{field}", help=f"This will be added to all rows")
-                    if value:
-                        extra_data_fields[field] = value
+            # Map field names to their corresponding column mapping names
+            field_to_mapping = {
+                "Comments": "Comments",
+                "Protocol": "Protocol"
+            }
+            
+            # Filter out fields that are already mapped
+            available_extra_fields = []
+            for field in all_optional_fields:
+                mapped_name = field_to_mapping.get(field, field)
+                if mapped_name not in mapped_fields and field not in mapped_fields:
+                    available_extra_fields.append(field)
+            
+            if available_extra_fields:
+                with st.expander("Add optional fields"):
+                    for field in available_extra_fields:
+                        value = st.text_input(f"{field}", "", key=f"extra_{field}", help=f"This will be added to all rows")
+                        if value:
+                            extra_data_fields[field] = value
+            else:
+                st.info("All optional fields are already mapped from your data columns")
 
             # Check for duplicates
             existing_samples = db.get_all_samples()
@@ -126,19 +151,16 @@ if page == "📤 Add Data":
                 researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
                 expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
                 
-                # Override researcher if provided in extra fields
-                check_researcher = extra_data_fields.get('Researcher Name', researcher) if extra_data_fields.get('Researcher Name') else researcher
-                
                 for existing in existing_samples:
                     # Check if all three fields match
                     if (existing['sample_id'] == sample_id and 
-                        existing['researcher'] == check_researcher and 
+                        existing['researcher'] == researcher and 
                         existing['expressed'] == expressed and 
                         sample_id):  # Only flag if sample ID exists
                         duplicates.append({
                             'row': idx + 1, 
                             'Sample ID': sample_id,
-                            'Researcher': check_researcher,
+                            'Researcher': researcher,
                             'Expressed': expressed
                         })
                         break
@@ -170,13 +192,10 @@ if page == "📤 Add Data":
                             # Check if this is a duplicate and should be skipped
                             is_duplicate = False
                             if skip_duplicates and sample_id:
-                                # Override researcher if provided
-                                check_researcher = extra_data_fields.get('Researcher Name', researcher) if extra_data_fields.get('Researcher Name') else researcher
-                                
                                 for existing in existing_samples:
                                     # Check if all three fields match for a true duplicate
                                     if (existing['sample_id'] == sample_id and 
-                                        existing['researcher'] == check_researcher and 
+                                        existing['researcher'] == researcher and 
                                         existing['expressed'] == expressed):
                                         is_duplicate = True
                                         skipped_count += 1
@@ -184,10 +203,6 @@ if page == "📤 Add Data":
                             
                             if is_duplicate:
                                 continue
-                            
-                            # Override researcher if provided in extra fields
-                            if extra_data_fields.get('Researcher Name'):
-                                researcher = extra_data_fields['Researcher Name']
                             
                             # Handle date
                             date_value = row.get('date', None)
