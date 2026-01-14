@@ -236,7 +236,7 @@ if page == "📤 Add Data":
             st.session_state.protocol = full_text
 
         PROTOCOL_DATABASE[uploaded_protocol_file.name] = {"Full Text": full_text,
-                                                          "Path": str(uploaded_protocol_file)}
+                                                          "Name": uploaded_protocol_file.name}
 
         # if not st.session_state.protocol_indexed:
         #     PROTOCOL_DATABASE[uploaded_protocol_file] = full_text
@@ -248,6 +248,8 @@ if page == "📤 Add Data":
     # Disable import button if Project ID is not provided
     st.text(f"Valid project: {valid_project}")
     if st.button("💾 Import All Data to Database", type="primary", disabled=(not valid_project)):
+        # ToDo: Rename columns following selected_values
+
         with st.spinner("Importing data..."):
             imported_count = 0
             skipped_count = 0
