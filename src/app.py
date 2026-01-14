@@ -84,7 +84,7 @@ if page == "📤 Add Data":
             column_names = df.columns.tolist()
 
             # Options for every combobox
-            options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist",
+            options = ["Project ID", "Sample ID", "Expressed", "KD/Binding", "Sequence", "Soluble", "Date", "Scientist",
                        "Comments", "Protocol"]
 
             # Cache encodings to avoid recomputing on every widget change
@@ -259,14 +259,12 @@ if page == "📤 Add Data":
             for idx, row in df.iterrows():
                 try:
                     # Extract values from columns
-                    ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist",
-                     "Comments", "Protocol"]
 
                     cur_project_id = str(row.get('Project ID', ''))
                     cur_sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
                     cur_researcher = str(row.get('Scientist', '')) if pd.notna(row.get('Scientist', '')) else ""
                     cur_expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
-                    cur_KD = str(row.get('KD', ''))
+                    cur_KD = str(row.get('KD/Binding', ''))
                     cur_sequence = str(row.get('Sequence', ''))
                     cur_soluble = str(row.get('Soluble', ''))
                     cur_date = str(row.get('Date', ''))
