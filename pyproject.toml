@@ -13,4 +13,5 @@ dependencies = [
     "seaborn>=0.13.2",
     "sentence-transformers>=5.2.0",
     "streamlit>=1.52.2",
+    "textsearchpy>=1.2.0",
 ]
