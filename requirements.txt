@@ -1,6 +1,6 @@
 sentence_transformers
-numpy
 scikit-learn
 numpy
 streamlit
 openpyxl
+pymc
