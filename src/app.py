@@ -84,7 +84,7 @@ if page == "📤 Add Data":
             column_names = df.columns.tolist()
 
             # Options for every combobox
-            options = ["Project ID", "Sample ID", "Expressed", "KD/Binding", "Sequence", "Soluble", "Date", "Scientist",
+            options = ["Project ID", "Sample ID", "Expressed", "KD/Binding", "Sequence", "Soluble", "Date", "Researcher",
                        "Comments", "Protocol"]
 
             # Cache encodings to avoid recomputing on every widget change
@@ -208,6 +208,7 @@ if page == "📤 Add Data":
             st.info("Make sure your file is a valid Excel (.xlsx, .xls) or CSV file.")
 
     protocol_full_text = ""
+    protocol_name = None
     if uploaded_protocol_file:
 
         # Use session state to cache the uploaded file data
@@ -230,12 +231,14 @@ if page == "📤 Add Data":
             protocol_full_text = "\n".join(all_text)
             st.pdf(uploaded_protocol_file)
             st.session_state.protocol = protocol_full_text
+            protocol_name = uploaded_protocol_file.name
         else:
             with open(uploaded_protocol_file, 'rb') as file:
                 protocol_full_text = file.read()
 
             st.markdown(protocol_full_text)
             st.session_state.protocol = protocol_full_text
+            protocol_name = uploaded_protocol_file.name
 
         PROTOCOL_DATABASE[project_id] = {"Full Text": protocol_full_text,
                                          "Name": uploaded_protocol_file.name}
@@ -262,7 +265,7 @@ if page == "📤 Add Data":
 
                     cur_project_id = str(row.get('Project ID', ''))
                     cur_sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
-                    cur_researcher = str(row.get('Scientist', '')) if pd.notna(row.get('Scientist', '')) else ""
+                    cur_researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
                     cur_expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
                     cur_KD = str(row.get('KD/Binding', ''))
                     cur_sequence = str(row.get('Sequence', ''))
@@ -302,7 +305,8 @@ if page == "📤 Add Data":
                         sample_id=cur_sample_id,
                         researcher=cur_researcher,
                         expressed=cur_expressed,
-                        date=date_str
+                        date=date_str,
+                        protocol_name=protocol_name
                     )
                     imported_count += 1
 
@@ -392,10 +396,8 @@ elif page == "📊 View All":
         import pandas as pd
 
         df = pd.DataFrame(all_samples)
-        # Rename columns for display
-        display_df = df[['sample_id', 'researcher', 'expressed', 'date']].copy()
-        display_df.columns = ['Sample ID', 'Researcher', 'Expressed', 'Date']
-        st.dataframe(display_df, use_container_width=True)
+        # Display all columns
+        st.dataframe(df, use_container_width=True)
 
         # Download option
         csv = df.to_csv(index=False)
