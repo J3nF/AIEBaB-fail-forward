@@ -9,7 +9,7 @@ from utils import encode_texts
 from sklearn.metrics.pairwise import cosine_similarity
 
 # Initialize
-DB_PATH = "lab_inventory.db"
+DB_PATH = "lab_data.db"
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
@@ -302,7 +302,7 @@ elif page == "📊 View All":
         st.download_button(
             "📥 Download as CSV",
             csv,
-            "lab_inventory.csv",
+            "lab_data.csv",
             "text/csv",
             key='download-csv'
         )
