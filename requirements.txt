@@ -5,3 +5,5 @@ streamlit
 openpyxl
 pymc
 streamlit-pdf
+textsearchpy
+pypdf
