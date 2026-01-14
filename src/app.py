@@ -30,12 +30,25 @@ if page == "📤 Add Data":
     if uploaded_file:
         import pandas as pd
         
+        # Use session state to cache the uploaded file data
+        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        
+        if 'last_file_id' not in st.session_state or st.session_state.last_file_id != file_id:
+            # New file uploaded, reset session state
+            st.session_state.last_file_id = file_id
+            st.session_state.df = None
+            st.session_state.column_encodings = None
+            st.session_state.option_encodings = None
+        
         try:
-            # Read Excel or CSV file
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
+            # Read Excel or CSV file only once
+            if st.session_state.df is None:
+                if uploaded_file.name.endswith('.csv'):
+                    st.session_state.df = pd.read_csv(uploaded_file)
+                else:
+                    st.session_state.df = pd.read_excel(uploaded_file)
+            
+            df = st.session_state.df
             
             st.success(f"✅ Loaded {len(df)} rows from {uploaded_file.name}")
             
@@ -51,8 +64,14 @@ if page == "📤 Add Data":
             # Options for every combobox
             options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist", "Comments", "Protocol"]
 
-            column_encodings = encode_texts(column_names)
-            option_encodings = encode_texts(options)
+            # Cache encodings to avoid recomputing on every widget change
+            if st.session_state.column_encodings is None:
+                with st.spinner("Analyzing column names..."):
+                    st.session_state.column_encodings = encode_texts(column_names)
+                    st.session_state.option_encodings = encode_texts(options)
+            
+            column_encodings = st.session_state.column_encodings
+            option_encodings = st.session_state.option_encodings
 
             similarities = cosine_similarity(column_encodings, option_encodings)
 
