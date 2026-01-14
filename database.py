@@ -15,15 +15,10 @@ class Database:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                strain TEXT,
-                plasmid TEXT,
-                antibiotic TEXT,
-                person TEXT,
-                location TEXT,
+                sample_id TEXT,
+                researcher TEXT,
+                expressed TEXT,
                 date TEXT,
-                notes TEXT,
-                image_path TEXT,
-                raw_text TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -31,7 +26,7 @@ class Database:
         # Create full-text search virtual table
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS samples_fts USING fts5(
-                strain, plasmid, antibiotic, person, location, notes, raw_text,
+                sample_id, researcher, expressed,
                 content=samples,
                 content_rowid=id
             )
@@ -40,41 +35,39 @@ class Database:
         # Create triggers to keep FTS table in sync
         cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS samples_ai AFTER INSERT ON samples BEGIN
-                INSERT INTO samples_fts(rowid, strain, plasmid, antibiotic, person, location, notes, raw_text)
-                VALUES (new.id, new.strain, new.plasmid, new.antibiotic, new.person, new.location, new.notes, new.raw_text);
+                INSERT INTO samples_fts(rowid, sample_id, researcher, expressed)
+                VALUES (new.id, new.sample_id, new.researcher, new.expressed);
             END
         """)
         
         cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS samples_ad AFTER DELETE ON samples BEGIN
-                INSERT INTO samples_fts(samples_fts, rowid, strain, plasmid, antibiotic, person, location, notes, raw_text)
-                VALUES('delete', old.id, old.strain, old.plasmid, old.antibiotic, old.person, old.location, old.notes, old.raw_text);
+                INSERT INTO samples_fts(samples_fts, rowid, sample_id, researcher, expressed)
+                VALUES('delete', old.id, old.sample_id, old.researcher, old.expressed);
             END
         """)
         
         cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS samples_au AFTER UPDATE ON samples BEGIN
-                INSERT INTO samples_fts(samples_fts, rowid, strain, plasmid, antibiotic, person, location, notes, raw_text)
-                VALUES('delete', old.id, old.strain, old.plasmid, old.antibiotic, old.person, old.location, old.notes, old.raw_text);
-                INSERT INTO samples_fts(rowid, strain, plasmid, antibiotic, person, location, notes, raw_text)
-                VALUES (new.id, new.strain, new.plasmid, new.antibiotic, new.person, new.location, new.notes, new.raw_text);
+                INSERT INTO samples_fts(samples_fts, rowid, sample_id, researcher, expressed)
+                VALUES('delete', old.id, old.sample_id, old.researcher, old.expressed);
+                INSERT INTO samples_fts(rowid, sample_id, researcher, expressed)
+                VALUES (new.id, new.sample_id, new.researcher, new.expressed);
             END
         """)
         
         conn.commit()
         conn.close()
     
-    def add_sample(self, strain: str, plasmid: str, antibiotic: str, 
-                   person: str, location: str, date: str, notes: str,
-                   image_path: str, raw_text: str) -> int:
+    def add_sample(self, sample_id: str, researcher: str, expressed: str, date: str) -> int:
         """Add a new sample to the database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute("""
-            INSERT INTO samples (strain, plasmid, antibiotic, person, location, date, notes, image_path, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (strain, plasmid, antibiotic, person, location, date, notes, image_path, raw_text))
+            INSERT INTO samples (sample_id, researcher, expressed, date)
+            VALUES (?, ?, ?, ?)
+        """, (sample_id, researcher, expressed, date))
         
         sample_id = cursor.lastrowid
         conn.commit()
@@ -126,16 +119,12 @@ class Database:
         params = []
         
         if person:
-            query += " AND person LIKE ?"
+            query += " AND researcher LIKE ?"
             params.append(f"%{person}%")
         
         if antibiotic:
-            query += " AND antibiotic LIKE ?"
+            query += " AND sample_id LIKE ?"
             params.append(f"%{antibiotic}%")
-        
-        if location:
-            query += " AND location LIKE ?"
-            params.append(f"%{location}%")
         
         query += " ORDER BY created_at DESC"
         
