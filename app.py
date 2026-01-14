@@ -39,6 +39,51 @@ if page == "📤 Add Data":
             # Show preview of data
             st.subheader("📋 Data Preview")
             st.dataframe(df.head(10), use_container_width=True)
+
+            column_names = df.columns.tolist()
+
+            # Options for every combobox
+            options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist", "Comments", "Protocol"]
+
+            st.title("Items with per-row combobox")
+
+            selected_values = {}
+
+            for i, item in enumerate(column_names):
+                # You can put text and selectbox on the same row using columns if you like
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.write(item)
+                with col2:
+                    # Use a unique key per widget
+                    selected = st.selectbox(
+                        "Select option",
+                        options,
+                        key=f"select_{i}",
+                        index=0,
+                    )
+                selected_values[item] = selected
+
+
+
+            # Check for duplicates
+            existing_samples = db.get_all_samples()
+            duplicates = []
+            
+            for idx, row in df.iterrows():
+                strain = str(row.get('strain', '')) if pd.notna(row.get('strain', '')) else ""
+                plasmid = str(row.get('plasmid', '')) if pd.notna(row.get('plasmid', '')) else ""
+                
+                for existing in existing_samples:
+                    if (existing['strain'] == strain and existing['plasmid'] == plasmid and 
+                        strain and plasmid):  # Only flag as duplicate if both fields have values
+                        duplicates.append({'row': idx + 1, 'strain': strain, 'plasmid': plasmid})
+                        break
+            
+            if duplicates:
+                st.warning(f"⚠️ Found {len(duplicates)} potential duplicate(s) in the database:")
+                dup_df = pd.DataFrame(duplicates)
+                st.dataframe(dup_df, use_container_width=True)
             
             # Optional fields to add to all rows
             st.subheader("➕ Add Extra Information (Optional)")
@@ -50,15 +95,35 @@ if page == "📤 Add Data":
             with col2:
                 extra_project_id = st.text_input("Project ID", "", help="This will be added to the notes field for all rows")
             
+            # Duplicate handling option
+            skip_duplicates = False
+            if duplicates:
+                skip_duplicates = st.checkbox("Skip duplicate rows during import", value=True)
+            
             if st.button("💾 Import All Data to Database", type="primary"):
                 with st.spinner("Importing data..."):
                     imported_count = 0
+                    skipped_count = 0
+                    imported_data = []
                     
                     for idx, row in df.iterrows():
                         try:
                             # Extract values from columns (use empty string if column doesn't exist)
                             strain = str(row.get('strain', '')) if pd.notna(row.get('strain', '')) else ""
                             plasmid = str(row.get('plasmid', '')) if pd.notna(row.get('plasmid', '')) else ""
+                            
+                            # Check if this is a duplicate and should be skipped
+                            is_duplicate = False
+                            if skip_duplicates and strain and plasmid:
+                                for existing in existing_samples:
+                                    if existing['strain'] == strain and existing['plasmid'] == plasmid:
+                                        is_duplicate = True
+                                        skipped_count += 1
+                                        break
+                            
+                            if is_duplicate:
+                                continue
+                            
                             antibiotic = str(row.get('antibiotic', '')) if pd.notna(row.get('antibiotic', '')) else ""
                             person = str(row.get('person', '')) if pd.notna(row.get('person', '')) else ""
                             location = str(row.get('location', '')) if pd.notna(row.get('location', '')) else ""
@@ -96,11 +161,28 @@ if page == "📤 Add Data":
                                 raw_text=""
                             )
                             imported_count += 1
+                            
+                            # Track imported data for summary
+                            imported_data.append({
+                                'strain': strain,
+                                'plasmid': plasmid,
+                                'person': person,
+                                'date': date_str
+                            })
                         except Exception as e:
                             st.warning(f"Row {idx + 1} skipped: {str(e)}")
                     
                     st.success(f"✅ Successfully imported {imported_count} samples!")
-                    st.balloons()
+                    if skipped_count > 0:
+                        st.info(f"⏭️ Skipped {skipped_count} duplicate(s)")
+                    
+                    # Display summary of imported data
+                    if imported_data:
+                        st.subheader("📋 Import Summary")
+                        summary_df = pd.DataFrame(imported_data)
+                        st.dataframe(summary_df, use_container_width=True)
+                    
+                    st.info("💡 View all your data in the '📊 View All' tab!")
         
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
