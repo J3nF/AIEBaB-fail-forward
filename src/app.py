@@ -7,9 +7,10 @@ from database import Database
 from search import search_samples
 from utils import encode_texts
 from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
 
 # Initialize
-DB_PATH = "lab_data.db"
+DB_PATH = "lab_inventory.db"
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
@@ -20,234 +21,243 @@ st.set_page_config(page_title="Failure Forward", page_icon="🧬", layout="wide"
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["📤 Add Data", "🔍 Search Data", "📊 View All"])
 
+
+# --- Helpers -------------------------------------------------------------
+
+OPTIONS = [
+    "Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble",
+    "Date", "Scientist", "Comments", "Protocol"
+]
+
+def load_dataframe(uploaded_file) -> pd.DataFrame:
+    if uploaded_file.name.lower().endswith(".csv"):
+        return pd.read_csv(uploaded_file)
+    return pd.read_excel(uploaded_file)
+
+def normalize_str(value) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    # pandas uses NaN for missing; pd.isna handles many types
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+def normalize_date(value) -> str:
+    if value is None or pd.isna(value):
+        return datetime.now().isoformat()
+    try:
+        return pd.to_datetime(value).isoformat()
+    except Exception:
+        return str(value)
+
+def build_best_guess_indices(column_names, options):
+    col_enc = st.session_state.get("column_encodings")
+    opt_enc = st.session_state.get("option_encodings")
+
+    if col_enc is None or opt_enc is None:
+        with st.spinner("Analyzing column names..."):
+            st.session_state.column_encodings = encode_texts(column_names)
+            st.session_state.option_encodings = encode_texts(options)
+
+    similarities = cosine_similarity(st.session_state.column_encodings, st.session_state.option_encodings)
+    return [int(np.argmax(sim)) for sim in similarities]
+
+def render_column_mapping(column_names):
+    best_indices = build_best_guess_indices(column_names, OPTIONS)
+
+    st.subheader("Column Name Mapping")
+    selected_values = {}
+
+    for i, col_name in enumerate(column_names):
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.write(col_name)
+        with c2:
+            selected = st.selectbox(
+                "Select option",
+                OPTIONS,
+                key=f"map_{i}",
+                index=best_indices[i],
+                label_visibility="collapsed",
+            )
+        selected_values[col_name] = selected
+
+    # Invert mapping: "Sample ID" -> actual dataframe column name (if assigned)
+    mapping = {}
+    for df_col, canonical in selected_values.items():
+        # last one wins if user maps two cols to same canonical field
+        mapping[canonical] = df_col
+
+    return mapping, set(selected_values.values())
+
+def get_project_id(mapped_fields):
+    st.subheader("🔑 Project ID (Required)")
+    if "Project ID" in mapped_fields:
+        st.success("✅ Project ID is mapped from your file.")
+        return None  # means "use column"
+    project_id = st.text_input("Enter Project ID", "", help="This Project ID will be applied to ALL rows.")
+    if not project_id:
+        st.warning("⚠️ Project ID is required before importing data.")
+    return project_id.strip() if project_id else ""
+
+def get_extra_fields(mapped_fields):
+    st.subheader("➕ Add Extra Information (Optional)")
+    all_optional_fields = ["Comments", "Protocol", "Other Notes"]
+    available = [f for f in all_optional_fields if f not in mapped_fields]
+
+    extra = {}
+    if not available:
+        st.info("All optional fields are already mapped from your data columns.")
+        return extra
+
+    with st.expander("Add optional fields"):
+        for field in available:
+            v = st.text_input(field, "", key=f"extra_{field}", help="This value will be added to all rows.")
+            if v.strip():
+                extra[field] = v.strip()
+    return extra
+
+def compute_existing_keys(existing_samples):
+    # "true duplicate" = same triple (sample_id, researcher, expressed)
+    return {
+        (normalize_str(s.get("sample_id")), normalize_str(s.get("researcher")), normalize_str(s.get("expressed")))
+        for s in existing_samples
+        if normalize_str(s.get("sample_id"))
+    }
+
+def extract_row_values(df_row, mapping, manual_project_id: str | None, extra_fields: dict):
+    # Resolve canonical fields -> df column names
+    sample_col = mapping.get("Sample ID")
+    researcher_col = mapping.get("Researcher") or mapping.get("Scientist")  # allow Scientist as fallback
+    expressed_col = mapping.get("Expressed")
+    date_col = mapping.get("Date")
+
+    sample_id = normalize_str(df_row.get(sample_col)) if sample_col else ""
+    researcher = normalize_str(df_row.get(researcher_col)) if researcher_col else ""
+    expressed = normalize_str(df_row.get(expressed_col)) if expressed_col else ""
+    date_str = normalize_date(df_row.get(date_col)) if date_col else datetime.now().isoformat()
+
+    # Project ID: from column if mapped, otherwise from manual input
+    if "Project ID" in mapping and mapping["Project ID"]:
+        project_id = normalize_str(df_row.get(mapping["Project ID"]))
+    else:
+        project_id = manual_project_id or ""
+
+    # Extra fields are “global” (same for all rows), not currently stored in DB
+    # If you add DB columns later, you can insert them here.
+    return sample_id, researcher, expressed, date_str, project_id
+
+# --- Page ---------------------------------------------------------------
+
 if page == "📤 Add Data":
     st.title("🧬 Add New Experiment Data")
-    st.markdown("Upload an Excel file with your experiment data!")
-    st.caption("Expected columns: Sample ID, Researcher, Expressed")
-    
-    uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx", "xls", "csv"])
-    
+    st.markdown("Upload an Excel/CSV file with your experiment data!")
+    st.caption("Expected data fields: Sample ID, Researcher/Scientist, Expressed (others optional)")
+
+    uploaded_file = st.file_uploader("Upload file", type=["xlsx", "xls", "csv"])
+
     if uploaded_file:
-        import pandas as pd
-        
-        # Use session state to cache the uploaded file data
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-        
-        if 'last_file_id' not in st.session_state or st.session_state.last_file_id != file_id:
-            # New file uploaded, reset session state
+
+        if st.session_state.get("last_file_id") != file_id:
             st.session_state.last_file_id = file_id
             st.session_state.df = None
             st.session_state.column_encodings = None
             st.session_state.option_encodings = None
-        
+
         try:
-            # Read Excel or CSV file only once
             if st.session_state.df is None:
-                if uploaded_file.name.endswith('.csv'):
-                    st.session_state.df = pd.read_csv(uploaded_file)
-                else:
-                    st.session_state.df = pd.read_excel(uploaded_file)
-            
+                st.session_state.df = load_dataframe(uploaded_file)
+
             df = st.session_state.df
-            
             st.success(f"✅ Loaded {len(df)} rows from {uploaded_file.name}")
-            
-            # Show preview of data
+
             st.subheader("📋 Data Preview")
             st.dataframe(df.head(10), use_container_width=True)
 
-            """
-            Column Name Mapping Part
-            """
             column_names = df.columns.tolist()
+            mapping, mapped_fields = render_column_mapping(column_names)
 
-            # Options for every combobox
-            options = ["Project ID", "Sample ID", "Expressed", "KD", "Sequence", "Soluble", "Date", "Scientist", "Comments", "Protocol"]
+            manual_project_id = get_project_id(mapped_fields)
+            extra_fields = get_extra_fields(mapped_fields)
 
-            # Cache encodings to avoid recomputing on every widget change
-            if st.session_state.column_encodings is None:
-                with st.spinner("Analyzing column names..."):
-                    st.session_state.column_encodings = encode_texts(column_names)
-                    st.session_state.option_encodings = encode_texts(options)
-            
-            column_encodings = st.session_state.column_encodings
-            option_encodings = st.session_state.option_encodings
+            # Require Project ID either mapped OR manually entered
+            project_ok = ("Project ID" in mapped_fields) or bool(manual_project_id)
 
-            similarities = cosine_similarity(column_encodings, option_encodings)
-
-            best_indice = [np.argmax(sim) for sim in similarities]
-
-
-            st.title("Column Name Mapping")
-
-            selected_values = {}
-
-            for i, item in enumerate(column_names):
-                # You can put text and selectbox on the same row using columns if you like
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.write(item)
-                with col2:
-                    # Use a unique key per widget
-                    selected = st.selectbox(
-                        "Select option",
-                        options,
-                        key=f"select_{i}",
-                        index=int(best_indice[i]),
-                    )
-                selected_values[item] = selected
-
-            # Check which fields are already mapped
-            mapped_fields = set(selected_values.values())
-            
-            # Required Project ID
-            st.subheader("🔑 Project ID (Required)")
-            
-            # Check if Project ID is already in the mapped columns
-            if "Project ID" in mapped_fields:
-                st.success("✅ Project ID already assigned from your data")
-                project_id = "assigned_from_data"  # Flag that it's from data
-            else:
-                project_id = st.text_input("Enter Project ID", "", help="This project ID will be added to ALL rows")
-                
-                if not project_id:
-                    st.warning("⚠️ Project ID is required before importing data")
-            
-            # Optional extra data
-            st.subheader("➕ Add Extra Information (Optional)")
-            
-            # Show dropdown for additional optional fields, excluding already mapped ones
-            extra_data_fields = {}
-            all_optional_fields = ["Comments", "Protocol", "Other Notes"]
-            
-            # Map field names to their corresponding column mapping names
-            field_to_mapping = {
-                "Comments": "Comments",
-                "Protocol": "Protocol"
-            }
-            
-            # Filter out fields that are already mapped
-            available_extra_fields = []
-            for field in all_optional_fields:
-                mapped_name = field_to_mapping.get(field, field)
-                if mapped_name not in mapped_fields and field not in mapped_fields:
-                    available_extra_fields.append(field)
-            
-            if available_extra_fields:
-                with st.expander("Add optional fields"):
-                    for field in available_extra_fields:
-                        value = st.text_input(f"{field}", "", key=f"extra_{field}", help=f"This will be added to all rows")
-                        if value:
-                            extra_data_fields[field] = value
-            else:
-                st.info("All optional fields are already mapped from your data columns")
-
-            # Check for duplicates
+            # Existing samples (for duplicate detection)
             existing_samples = db.get_all_samples()
+            existing_keys = compute_existing_keys(existing_samples)
+
+            # Scan for duplicates quickly
             duplicates = []
-            
             for idx, row in df.iterrows():
-                sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
-                researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
-                expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
-                
-                for existing in existing_samples:
-                    # Check if all three fields match
-                    if (existing['sample_id'] == sample_id and 
-                        existing['researcher'] == researcher and 
-                        existing['expressed'] == expressed and 
-                        sample_id):  # Only flag if sample ID exists
-                        duplicates.append({
-                            'row': idx + 1, 
-                            'Sample ID': sample_id,
-                            'Researcher': researcher,
-                            'Expressed': expressed
-                        })
-                        break
-            
+                sample_id, researcher, expressed, _, _ = extract_row_values(row, mapping, manual_project_id, extra_fields)
+                if sample_id and (sample_id, researcher, expressed) in existing_keys:
+                    duplicates.append({
+                        "row": idx + 1,
+                        "Sample ID": sample_id,
+                        "Researcher": researcher,
+                        "Expressed": expressed
+                    })
+
             if duplicates:
                 st.warning(f"⚠️ Found {len(duplicates)} potential duplicate(s) in the database:")
-                dup_df = pd.DataFrame(duplicates)
-                st.dataframe(dup_df, use_container_width=True)
-            
-            # Duplicate handling option
-            skip_duplicates = False
-            if duplicates:
+                st.dataframe(pd.DataFrame(duplicates), use_container_width=True)
                 skip_duplicates = st.checkbox("Skip duplicate rows during import", value=True)
-            
-            # Disable import button if Project ID is not provided
-            if st.button("💾 Import All Data to Database", type="primary", disabled=(not project_id)):
+            else:
+                skip_duplicates = False
+
+            if st.button("💾 Import All Data to Database", type="primary", disabled=(not project_ok)):
                 with st.spinner("Importing data..."):
                     imported_count = 0
                     skipped_count = 0
                     imported_data = []
-                    
+
                     for idx, row in df.iterrows():
                         try:
-                            # Extract values from columns
-                            sample_id = str(row.get('Sample ID', '')) if pd.notna(row.get('Sample ID', '')) else ""
-                            researcher = str(row.get('Researcher', '')) if pd.notna(row.get('Researcher', '')) else ""
-                            expressed = str(row.get('Expressed', '')) if pd.notna(row.get('Expressed', '')) else ""
-                            
-                            # Check if this is a duplicate and should be skipped
-                            is_duplicate = False
-                            if skip_duplicates and sample_id:
-                                for existing in existing_samples:
-                                    # Check if all three fields match for a true duplicate
-                                    if (existing['sample_id'] == sample_id and 
-                                        existing['researcher'] == researcher and 
-                                        existing['expressed'] == expressed):
-                                        is_duplicate = True
-                                        skipped_count += 1
-                                        break
-                            
-                            if is_duplicate:
-                                continue
-                            
-                            # Handle date
-                            date_value = row.get('date', None)
-                            if date_value and pd.notna(date_value):
-                                try:
-                                    date_str = pd.to_datetime(date_value).isoformat()
-                                except:
-                                    date_str = str(date_value)
-                            else:
-                                date_str = datetime.now().isoformat()
-                            
-                            db.add_sample(
-                                sample_id=sample_id,
-                                researcher=researcher,
-                                expressed=expressed,
-                                date=date_str
+                            sample_id, researcher, expressed, date_str, project_id = extract_row_values(
+                                row, mapping, manual_project_id, extra_fields
                             )
+
+                            # Skip blank Sample IDs (optional but usually sensible)
+                            if not sample_id:
+                                skipped_count += 1
+                                continue
+
+                            key = (sample_id, researcher, expressed)
+                            if skip_duplicates and key in existing_keys:
+                                skipped_count += 1
+                                continue
+
+                            # NOTE: your Database currently ignores project_id/extra_fields because schema doesn't have them
+                            db.add_sample(sample_id=sample_id, researcher=researcher, expressed=expressed, date=date_str)
                             imported_count += 1
-                            
-                            # Track imported data for summary
+                            existing_keys.add(key)
+
                             imported_data.append({
-                                'Sample ID': sample_id,
-                                'Researcher': researcher,
-                                'Expressed': expressed,
-                                'Date': date_str
+                                "Project ID": project_id,
+                                "Sample ID": sample_id,
+                                "Researcher": researcher,
+                                "Expressed": expressed,
+                                "Date": date_str
                             })
                         except Exception as e:
-                            st.warning(f"Row {idx + 1} skipped: {str(e)}")
-                    
+                            st.warning(f"Row {idx + 1} skipped: {e}")
+                            skipped_count += 1
+
                     st.success(f"✅ Successfully imported {imported_count} samples!")
-                    if skipped_count > 0:
-                        st.info(f"⏭️ Skipped {skipped_count} duplicate(s)")
-                    
-                    # Display summary of imported data
+                    if skipped_count:
+                        st.info(f"⏭️ Skipped {skipped_count} row(s)")
+
                     if imported_data:
                         st.subheader("📋 Import Summary")
-                        summary_df = pd.DataFrame(imported_data)
-                        st.dataframe(summary_df, use_container_width=True)
-                    
-                    st.info("💡 View all your data in the '📊 View All' tab!")
-        
-        except Exception as e:
-            st.error(f"❌ Error reading file: {str(e)}")
-            st.info("Make sure your file is a valid Excel (.xlsx, .xls) or CSV file.")
+                        st.dataframe(pd.DataFrame(imported_data), use_container_width=True)
 
+                    st.info("💡 View all your data in the '📊 View All' tab!")
+
+        except Exception as e:
+            st.error(f"❌ Error reading file: {e}")
+            st.info("Make sure your file is a valid Excel (.xlsx, .xls) or CSV file.")
 elif page == "🔍 Search Data":
     st.title("🔍 Search Experiment Repository")
     
@@ -317,7 +327,7 @@ elif page == "📊 View All":
         st.download_button(
             "📥 Download as CSV",
             csv,
-            "lab_data.csv",
+            "lab_inventory.csv",
             "text/csv",
             key='download-csv'
         )
